@@ -1,0 +1,5 @@
+output/
+*.mp3
+*.opus
+list.txt
+.DS_Store
