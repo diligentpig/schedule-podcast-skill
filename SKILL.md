@@ -24,7 +24,7 @@ description: Generate a short Chinese audio podcast (≤5 min) from Top10 news: 
 - If **any anomaly** (429/401/network/retry/restart/fallback): 在元数据中注明异常情况及处理结果
 
 ## Model preference (fallback chain)
-- **文稿生成**: OpenAI OAuth (默认) → minimax-portal (fallback, 不是 API key)
+- **文稿生成**: 使用执行本任务的 agent 在 `openclaw.json` 中配置的模型（primary，过载时自动按 `fallbacks` 顺位切换）。本 skill **不指定**具体模型 id —— 模型由 openclaw.json 统一管理，避免文档与活配置漂移。
 - **TTS**: Edge TTS **zh-CN-YunxiNeural** (男声) (default) → OpenAI TTS (fallback)
 - **TTS 语速**: 1.2x (默认)
 
@@ -92,7 +92,7 @@ description: Generate a short Chinese audio podcast (≤5 min) from Top10 news: 
 - **默认不保存到 Dropbox**（除非用户显式要求）
 - **禁止**把"Telegram 发送失败"作为触发条件去上传 Dropbox 兜底；失败就直接在群里报告失败原因与下一步
 - **必须附带元数据**（同一条消息内，MP3文件作为附件，元数据放在caption中）：
-  - 文稿模型：`model_used`（如 "OpenAI (默认)" 或 "minimax-portal (fallback)"）
+  - 文稿模型：`model_used`（填实际生成本期文稿的模型，如 "MiniMax-M3 (primary)" 或 "gpt-5.4 (fallback)"，按运行时实际命中的模型如实标注）
   - Search API：`search_api`（如 Brave）
   - TTS 引擎：`tts_engine`（如 Edge TTS / OpenAI TTS）
   - TTS Voice：`tts_voice`（如 zh-CN-YunxiNeural）
