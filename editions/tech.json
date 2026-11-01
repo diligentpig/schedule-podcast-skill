@@ -1,0 +1,16 @@
+{
+  "id": "tech",
+  "time": "0700",
+  "title": "晨间科技播客",
+  "topic_desc": "Tech Top10：AI 与大模型、科技公司与资本市场、网络安全、芯片与硬件、机器人与前沿科研。",
+  "opening": "今天是{date_cn}，{weekday_cn}。早上好，欢迎收听晨间科技新闻。",
+  "search": {
+    "query_hints": [
+      "AI artificial intelligence news latest today",
+      "tech industry big tech earnings latest",
+      "cybersecurity breach news today",
+      "semiconductor chip news latest",
+      "robotics startup funding news today"
+    ]
+  }
+}

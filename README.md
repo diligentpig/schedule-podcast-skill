@@ -1,91 +1,62 @@
 # schedule-podcast-skill
 
-A reusable OpenClaw skill for generating a short Chinese news podcast (usually Top10) and delivering it as an MP3.
+A reusable OpenClaw skill (`podcast-pipeline`) that turns the day's news into a short Chinese
+audio podcast (Top-N items, a few minutes) and delivers it as one Telegram message: MP3 + caption.
 
-This repo packages the `podcast-pipeline` skill for scheduled runs such as:
-- `07:00` morning tech news
-- `23:00` evening politics news
+Every podcast is an **edition** described by a JSON config. Two ship today:
 
-## What this skill does
+| Edition | Time | Content |
+|---|---|---|
+| `tech` | 07:00 | Tech Top10 (AI, big tech, security, chips, robotics) |
+| `politics` | 23:00 | Politics Top10 (China + world) |
 
-Given a topic, date/time label, and Telegram delivery target, the skill will:
-1. collect candidate news with web search
-2. dedupe and rank them into a Top10
-3. write a Chinese spoken-style script
-4. generate segmented TTS audio
-5. concat to a voice-only MP3
-6. mix background music by default
-7. deliver one MP3 with caption metadata + Top10 summary
+Adding a new podcast = adding `editions/<id>.json` with only the values that differ from
+`editions/defaults.json`, plus a cron job that invokes the skill with that edition.
 
-## Repo contents
+## What a run does
 
-- `SKILL.md` — the actual skill definition and workflow contract
-- `scripts/edition_env.py` — Step 0: derive the edition date / filename / spoken date / freshness cutoff from the system clock
-- `scripts/resolve_model.py` — Step 6.4: read the exact `provider/model_id` of the current run from OpenClaw's run record (detects fallback)
-- `scripts/verify_edition.py` — Step 6.5: fail-closed pre-delivery gate (filename, spoken date, source freshness, duration, `model_used`)
-- `scripts/concat_opus.sh` — concat `part*` TTS segments (Opus or MP3) and export `voice_only.mp3`
-- `scripts/mix_bgm.sh` — mix voice + BGM into final MP3, with runaway-output guards
+1. resolve the edition (date, filename and all parameters) — `edition_env.py`
+2. collect candidates with web search, drop stale items, rank Top-N
+3. write a Chinese spoken script
+4. segmented TTS — `tts_edge.py`
+5. concat to voice-only MP3 — `concat_parts.sh`
+6. mix background music — `mix_bgm.sh`
+7. resolve the exact model used and write metadata + caption — `resolve_model.py`
+8. fail-closed pre-delivery gate — `verify_edition.py`
+9. deliver via Telegram; report any failure via Telegram too
 
-## Intended callers
+See `SKILL.md` for the full operational contract.
 
-This skill is meant for:
-- OpenClaw scheduled jobs / cron wrappers
-- other agents that need a reusable news-podcast generator
-- manual one-off runs with explicit topic + delivery inputs
+## Configuration
 
-## Required inputs
+Merge order, later wins (objects merge recursively, lists/scalars replace):
 
-Callers should decide and pass these inputs before invoking the skill:
+1. `editions/defaults.json` — shared defaults, equal to the current production setup
+2. `editions/local.json` — host-specific values, git-ignored (copy `local.example.json`)
+3. `editions/<id>.json` — the edition, or any file passed with `--config`
 
-- `topic`: typically `tech` or `politics`
-- `chatId`: Telegram target chat id
-- `edition_date` (optional): only for a manual re-run of a past edition (`--date YYYY-MM-DD`)
+Configurable: topic description, schedule time, timezone, title, opening line, item count,
+candidate pool, script length, duration window, search language / query count / freshness /
+max source age / preferred sources / query hints, TTS engine / voice / rate / segment size /
+fallback, BGM on/off / path / volume / download helper, export bitrate / sample rate /
+channels, delivery retry and Dropbox upload.
 
-The edition date, time label and filename (`{YYYYMMDD}_{HHMM}_{topic}.mp3`) are **not** caller
-inputs any more: `scripts/edition_env.py` derives them from the system clock, because a model
-writing dates from memory produced podcasts stamped and narrated with the wrong year.
-- `bgm_path` (optional): Dropbox App Folder path, default `/新闻播客 BGM.mp3`
-- `save_to_dropbox` (optional): default `false`
+```bash
+python3 scripts/edition_config.py --list                 # available editions
+python3 scripts/edition_config.py --edition tech         # merged config
+python3 scripts/edition_env.py --edition tech            # this run's $EDITION_* values
+python3 scripts/edition_env.py --topic special --time 1530 --title 特别播客   # one-off, defaults only
+```
 
-## Expected output
+The Telegram chatId is **not** in the configs (this repo is public); the caller supplies it.
 
-The final delivery must be a **single Telegram message** containing:
-- the MP3 attachment
-- a caption with:
-  - metadata block
-  - Top10 title list
+## Callers
 
-Typical file name examples:
-- `20260511_0700_tech.mp3`
-- `20260511_2300_politics.mp3`
-
-## Scheduling contract
-
-Important design rule:
-
-- the **workflow lives only in `SKILL.md`**
-- the **scheduler should only provide timing + invoke this skill + pass parameters**
-
-So if you want to change generation logic, update `SKILL.md` instead of duplicating logic in cron or wrapper scripts.
-
-## Runtime assumptions
-
-This skill assumes the runtime environment has:
-- `ffmpeg`
-- `ffprobe`
-- an available TTS path (Edge TTS by default; OpenAI TTS as fallback)
-- OpenClaw tools such as `web_search`, `message`, and optionally `sessions_send`
-- Dropbox download helper if BGM is fetched from Dropbox App Folder
-
-Referenced helper outside this repo:
-- `/home/wzf/.openclaw/workspace/scripts/dropbox_download.py`
-
-## Notes for integrators
-
-- Do not use generic filenames like `final.mp3`
-- Use absolute paths in automation environments
-- Do not silently skip failure reporting
-- If BGM mixing fails, report anomaly and fall back to voice-only delivery only when allowed by the skill contract
+- OpenClaw cron jobs: pass the edition id, the chatId and an `--out-root`; the workflow lives
+  only in `SKILL.md`, so do not duplicate logic in the cron prompt.
+- Delivery is done by the running agent itself; relaying through `main` or another agent is not
+  allowed (enforced by config validation, `delivery.send_via` must be `self`).
+- Manual re-run of a past edition: `--date YYYY-MM-DD`.
 
 ## Why the scripts exist
 
@@ -94,13 +65,14 @@ Each script replaces something the model used to author and got wrong:
 | Was model-authored | Failure seen | Now |
 |---|---|---|
 | edition date / filename | wrong year in filename and narration | `edition_env.py` |
+| item count, voice, speed, length | drifted per run | `editions/*.json` → `$EDITION_*` |
+| TTS code | rewritten every run | `tts_edge.py` |
 | `model_used` metadata | vague `GPT-6`, or "unverified" | `resolve_model.py` |
 | ffmpeg mix command | 59 GiB runaway MP3 filled the disk | `mix_bgm.sh` only, with three caps |
 | "looks fine, send it" | — | `verify_edition.py`, exit ≠ 0 blocks delivery |
 
-## Source skill name
+## Requirements
 
-OpenClaw skill name:
-- `podcast-pipeline`
-
-See `SKILL.md` for the full operational rules.
+`python3` ≥ 3.9 (stdlib), `ffmpeg`, `ffprobe`, `edge-tts` (pip). OpenClaw tools `web_search`
+and `message`. A Dropbox download helper for the BGM (path in `editions/local.json`).
+`resolve_model.py` reads OpenClaw's run records (`$OPENCLAW_STATE_DIR`, default `~/.openclaw`).

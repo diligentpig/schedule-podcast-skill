@@ -1,0 +1,5 @@
+{
+  "bgm": {
+    "download_helper": "/absolute/path/to/dropbox_download.py"
+  }
+}

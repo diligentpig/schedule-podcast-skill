@@ -24,16 +24,11 @@ import os
 import re
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import date
 
-from edition_env import PRESETS, build_env, parse_date
+from edition_env import add_identity_args, resolve
 from resolve_model import UNRESOLVED, from_cli, from_sqlite
 
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
-# SKILL.md step 5.5: regenerate outside this window.
-DURATION_MIN_S = 180.0
-DURATION_MAX_S = 260.0
 
 # Sanity ceiling on the delivered file. At 96 kbps mono a ~4 min edition is ~3 MB;
 # 50 MB is ~15x headroom yet catches a runaway mix long before it matters.
@@ -103,10 +98,11 @@ def check_audio(rep, audio, env):
     else:
         rep.ok("audio.filename", actual)
 
-    check_duration(rep, audio)
+    check_duration(rep, audio, env)
 
 
-def check_duration(rep, audio):
+def check_duration(rep, audio, env):
+    lo, hi = float(env["EDITION_DURATION_MIN_S"]), float(env["EDITION_DURATION_MAX_S"])
     try:
         out = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -124,9 +120,9 @@ def check_duration(rep, audio):
         return
 
     pretty = f"{int(secs // 60)}分{int(secs % 60)}秒"
-    if not DURATION_MIN_S <= secs <= DURATION_MAX_S:
+    if not lo <= secs <= hi:
         rep.fail("audio.duration",
-                 f"{pretty} outside {int(DURATION_MIN_S)}-{int(DURATION_MAX_S)}s; regenerate per SKILL.md 5.5")
+                 f"{pretty} outside {int(lo)}-{int(hi)}s (edition config); regenerate per SKILL.md 5.5")
     else:
         rep.ok("audio.duration", pretty)
 
@@ -176,6 +172,22 @@ def check_sources(rep, sources_path, env):
         rep.ok("sources.query_year", f"all month+year references are {year}")
 
     check_source_freshness(rep, text, env)
+    check_item_count(rep, text, env)
+
+
+ITEM_RE = re.compile(r"^\s*(\d{1,2})[.、)]\s+\S", re.MULTILINE)
+
+
+def check_item_count(rep, text, env):
+    want = int(env["EDITION_ITEM_COUNT"])
+    got = len({int(n) for n in ITEM_RE.findall(text)})
+    if got == want:
+        rep.ok("sources.item_count", f"{got} items")
+    elif 0 < got < want:
+        rep.warn("sources.item_count",
+                 f"{got} items, edition wants {want}; allowed only if fresh news ran out — say so in anomalies")
+    else:
+        rep.warn("sources.item_count", f"found {got} numbered items, edition wants {want}")
 
 
 def check_source_freshness(rep, text, env):
@@ -265,18 +277,35 @@ def check_model(rep, base, args):
         rep.fail("caption.model_used", f"caption does not contain {needle!r}; it must match metadata")
 
 
+def check_params(rep, base, args, env):
+    """metadata must report the configured voice/speed/export/BGM, or explain why not."""
+    meta_path = args.metadata_file or os.path.join(base, "metadata.json")
+    try:
+        meta = json.loads(read_text(meta_path))
+    except (OSError, ValueError):
+        return  # check_model already reported it
+    explained = bool(str(meta.get("anomalies", "")).strip()) and "normal" not in str(meta.get("anomalies", "")).lower()
+    want = {
+        "tts_voice": env["EDITION_TTS_VOICE"],
+        "speed": env["EDITION_TTS_SPEED_LABEL"],
+        "export": env["EDITION_EXPORT_LABEL"],
+        "has_bgm": "是" if env["EDITION_BGM_ENABLED"] == "1" else "否",
+    }
+    for key, val in want.items():
+        got = str(meta.get(key, "")).strip()
+        if got.startswith(val):
+            rep.ok(f"metadata.{key}", got)
+        elif explained:
+            rep.warn(f"metadata.{key}", f"{got!r} differs from config {val!r} (anomalies present — check they explain it)")
+        else:
+            rep.fail(f"metadata.{key}", f"{got!r} differs from config {val!r} and anomalies do not explain it")
+
+
 def parse_args(argv):
-    p = argparse.ArgumentParser(description="Verify an edition before delivery.")
-    g = p.add_mutually_exclusive_group(required=True)
-    g.add_argument("--edition", choices=sorted(PRESETS))
-    g.add_argument("--topic")
-    p.add_argument("--time", dest="hhmm")
-    p.add_argument("--date", dest="on_date", help="Same --date passed to edition_env.py (manual re-runs).")
-    p.add_argument("--tz", default="Asia/Shanghai")
-    p.add_argument("--max-age-days", type=int, default=2)
-    p.add_argument("--now", help="ISO-8601 override for the current time (testing only).")
+    p = argparse.ArgumentParser(description="Verify an edition before delivery. Pass the SAME "
+                                "--edition/--config/--topic/--time/--date as edition_env.py.")
+    add_identity_args(p)
     p.add_argument("--dir", help="Edition dir; infers audio/script/sources when not given explicitly.")
-    p.add_argument("--out-root", default=".", help="Root dir for the edition (default: cwd).")
     p.add_argument("--audio", help="Final MP3 path.")
     p.add_argument("--script", dest="script_file", help="Chinese script file.")
     p.add_argument("--sources", dest="sources_file", help="Sources markdown file.")
@@ -291,28 +320,7 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
 
-    topic = args.edition or args.topic
-    if args.hhmm:
-        if not re.fullmatch(r"([01]\d|2[0-3])[0-5]\d", args.hhmm):
-            sys.exit(f"error: --time must be HHMM, got {args.hhmm!r}")
-        hour, minute = int(args.hhmm[:2]), int(args.hhmm[2:])
-    elif args.edition:
-        hour, minute = PRESETS[args.edition]
-    else:
-        sys.exit("error: --topic requires --time")
-
-    try:
-        tz = ZoneInfo(args.tz)
-    except ZoneInfoNotFoundError:
-        sys.exit(f"error: unknown timezone {args.tz!r}")
-
-    now = None
-    if args.now:
-        now = datetime.fromisoformat(args.now)
-        now = now.replace(tzinfo=tz) if now.tzinfo is None else now.astimezone(tz)
-
-    env = build_env(topic, hour, minute, tz, args.out_root, args.max_age_days, now,
-                    parse_date(args.on_date))
+    _cfg, env = resolve(args)
 
     base = args.dir or env["EDITION_DIR"]
     audio = args.audio or os.path.join(base, env["EDITION_BASENAME"])
@@ -324,6 +332,7 @@ def main(argv=None):
     check_script(rep, script_file, env)
     check_sources(rep, sources_file, env)
     check_model(rep, base, args)
+    check_params(rep, base, args, env)
 
     print(f"edition: {env['EDITION_SLUG']}  ({env['EDITION_DATE_CN']} {env['EDITION_WEEKDAY_CN']}, "
           f"{env['EDITION_TZ']})")

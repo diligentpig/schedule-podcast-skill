@@ -4,3 +4,4 @@ output/
 list.txt
 .DS_Store
 __pycache__/
+editions/local.json

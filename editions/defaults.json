@@ -1,0 +1,57 @@
+{
+  "tz": "Asia/Shanghai",
+  "language": "zh-CN",
+  "content": {
+    "format": "news-topN",
+    "item_count": 10,
+    "candidate_pool": [20, 30],
+    "script_chars": [950, 1250],
+    "per_item_chars": [90, 130]
+  },
+  "duration": {
+    "target_s": [190, 230],
+    "min_s": 180,
+    "max_s": 260
+  },
+  "search": {
+    "tool": "web_search",
+    "provider_label": "Brave",
+    "query_language": "en",
+    "query_count": [3, 6],
+    "results_per_query": 10,
+    "freshness": "day",
+    "max_age_days": 2,
+    "serial_delay_s": 2,
+    "preferred_sources": ["official / government", "Reuters", "AP", "major outlets"],
+    "query_hints": []
+  },
+  "tts": {
+    "engine": "edge",
+    "voice": "zh-CN-YunxiNeural",
+    "rate": "+20%",
+    "speed_label": "1.2x",
+    "segment_max_chars": 235,
+    "segments": [6, 10],
+    "fallback_engine": "openai"
+  },
+  "bgm": {
+    "enabled": true,
+    "source": "dropbox",
+    "path": "/新闻播客 BGM.mp3",
+    "volume": 0.12,
+    "download_helper": ""
+  },
+  "export": {
+    "bitrate": "96k",
+    "sample_rate": 24000,
+    "channels": 1
+  },
+  "delivery": {
+    "channel": "telegram",
+    "send_via": "self",
+    "retry_after_min": 10,
+    "save_to_dropbox": false
+  },
+  "title": "{topic}播客",
+  "opening": "今天是{date_cn}，{weekday_cn}。"
+}

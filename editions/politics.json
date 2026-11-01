@@ -1,0 +1,16 @@
+{
+  "id": "politics",
+  "time": "2300",
+  "title": "晚间时政播客",
+  "topic_desc": "Politics Top10 (CN+World)：中国政治经济与外交、国际关系与安全、主要国家选举与施政、地区冲突。",
+  "opening": "今天是{date_cn}，{weekday_cn}。这里是晚间时政新闻。",
+  "search": {
+    "query_hints": [
+      "world politics latest today Reuters AP diplomacy war",
+      "China politics economy diplomacy latest today",
+      "US politics Congress White House latest today",
+      "Ukraine Russia Middle East latest today Reuters",
+      "Europe Asia elections government latest today"
+    ]
+  }
+}
