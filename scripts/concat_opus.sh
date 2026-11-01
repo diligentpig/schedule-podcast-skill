@@ -4,7 +4,7 @@ set -euo pipefail
 # Usage:
 #   concat_opus.sh <audio_dir> <out_dir>
 # Expects part01.opus... in <audio_dir>
-# Produces: full.opus + voice_only.mp3 in <out_dir>
+# Produces: a concatenated intermediate + voice_only.mp3 in <out_dir>
 
 AUDIO_DIR="${1:?audio_dir}"
 OUT_DIR="${2:?out_dir}"
@@ -26,8 +26,24 @@ if ! grep -q "^file 'part" "$LIST"; then
   exit 2
 fi
 
-ffmpeg -hide_banner -loglevel error -f concat -safe 0 -i "$LIST" -c copy "$OUT_DIR/full.opus"
-ffmpeg -hide_banner -loglevel error -i "$OUT_DIR/full.opus" -c:a libmp3lame -b:a 96k -ar 24000 -ac 1 "$OUT_DIR/voice_only.mp3"
+FIRST_PART=$(ls -1 "$OUT_DIR"/part*.opus | sort -V | head -1)
+FORMAT_NAME=$(ffprobe -v error -show_entries format=format_name -of default=nk=1:nw=1 "$FIRST_PART")
 
-echo "OK: $OUT_DIR/full.opus"
+case "$FORMAT_NAME" in
+  mp3)
+    INTERMEDIATE="$OUT_DIR/full.mp3"
+    ;;
+  ogg|opus)
+    INTERMEDIATE="$OUT_DIR/full.opus"
+    ;;
+  *)
+    echo "Unsupported part format: $FORMAT_NAME" >&2
+    exit 3
+    ;;
+esac
+
+ffmpeg -hide_banner -loglevel error -f concat -safe 0 -i "$LIST" -c copy "$INTERMEDIATE"
+ffmpeg -hide_banner -loglevel error -i "$INTERMEDIATE" -c:a libmp3lame -b:a 96k -ar 24000 -ac 1 "$OUT_DIR/voice_only.mp3"
+
+echo "OK: $INTERMEDIATE"
 echo "OK: $OUT_DIR/voice_only.mp3"

@@ -20,8 +20,11 @@ Given a topic, date/time label, and Telegram delivery target, the skill will:
 ## Repo contents
 
 - `SKILL.md` — the actual skill definition and workflow contract
-- `scripts/concat_opus.sh` — concat `part*.opus` and export `voice_only.mp3`
-- `scripts/mix_bgm.sh` — mix voice + BGM into final MP3
+- `scripts/edition_env.py` — Step 0: derive the edition date / filename / spoken date / freshness cutoff from the system clock
+- `scripts/resolve_model.py` — Step 6.4: read the exact `provider/model_id` of the current run from OpenClaw's run record (detects fallback)
+- `scripts/verify_edition.py` — Step 6.5: fail-closed pre-delivery gate (filename, spoken date, source freshness, duration, `model_used`)
+- `scripts/concat_opus.sh` — concat `part*` TTS segments (Opus or MP3) and export `voice_only.mp3`
+- `scripts/mix_bgm.sh` — mix voice + BGM into final MP3, with runaway-output guards
 
 ## Intended callers
 
@@ -34,11 +37,13 @@ This skill is meant for:
 
 Callers should decide and pass these inputs before invoking the skill:
 
-- `edition_date`: Shanghai date, e.g. `2026-05-11`
-- `time_label`: e.g. `0700` or `2300`
 - `topic`: typically `tech` or `politics`
 - `chatId`: Telegram target chat id
-- `filename`: must follow `{YYYYMMDD}_{HHMM}_{topic}.mp3`
+- `edition_date` (optional): only for a manual re-run of a past edition (`--date YYYY-MM-DD`)
+
+The edition date, time label and filename (`{YYYYMMDD}_{HHMM}_{topic}.mp3`) are **not** caller
+inputs any more: `scripts/edition_env.py` derives them from the system clock, because a model
+writing dates from memory produced podcasts stamped and narrated with the wrong year.
 - `bgm_path` (optional): Dropbox App Folder path, default `/新闻播客 BGM.mp3`
 - `save_to_dropbox` (optional): default `false`
 
@@ -81,6 +86,17 @@ Referenced helper outside this repo:
 - Use absolute paths in automation environments
 - Do not silently skip failure reporting
 - If BGM mixing fails, report anomaly and fall back to voice-only delivery only when allowed by the skill contract
+
+## Why the scripts exist
+
+Each script replaces something the model used to author and got wrong:
+
+| Was model-authored | Failure seen | Now |
+|---|---|---|
+| edition date / filename | wrong year in filename and narration | `edition_env.py` |
+| `model_used` metadata | vague `GPT-6`, or "unverified" | `resolve_model.py` |
+| ffmpeg mix command | 59 GiB runaway MP3 filled the disk | `mix_bgm.sh` only, with three caps |
+| "looks fine, send it" | — | `verify_edition.py`, exit ≠ 0 blocks delivery |
 
 ## Source skill name
 

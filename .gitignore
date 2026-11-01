@@ -3,3 +3,4 @@ output/
 *.opus
 list.txt
 .DS_Store
+__pycache__/
