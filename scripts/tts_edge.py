@@ -60,7 +60,12 @@ def segment(text, max_chars):
             parts.append(cur)
             cur = ""
     if cur:
-        parts.append(cur)
+        # A short tail (e.g. a 9-char sign-off) becomes its own TTS call and an odd
+        # pause; fold it into the previous segment instead.
+        if parts and len(cur) < max_chars * 0.3:
+            parts[-1] += cur
+        else:
+            parts.append(cur)
     return parts
 
 
